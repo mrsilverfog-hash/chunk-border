@@ -2,7 +2,6 @@ package net.tropimon.chunkborders;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.*;
 import net.minecraft.util.math.BlockPos;
@@ -21,6 +20,10 @@ public class ChunkBordersRenderer {
     private static final int LINE_TOP = 320;
     private static final float CROSS_SIZE = 1.0f;
 
+    // Cache du sol mis à jour toutes les 20 ticks
+    private static int[] cachedGroundY = new int[9];
+    private static long lastGroundScan = -1;
+
     public static void render(WorldRenderContext context) {
         if (!ChunkBordersClient.showBorders) return;
 
@@ -34,7 +37,19 @@ public class ChunkBordersRenderer {
         int playerChunkX = (int) Math.floor(camPos.x) >> 4;
         int playerChunkZ = (int) Math.floor(camPos.z) >> 4;
 
-        int radius = 8;
+        // Mettre à jour le sol toutes les secondes seulement
+        long tick = world.getTime();
+        if (tick - lastGroundScan >= 20) {
+            lastGroundScan = tick;
+            int i = 0;
+            for (int cx = playerChunkX; cx <= playerChunkX + 1; cx++) {
+                for (int cz = playerChunkZ; cz <= playerChunkZ + 1; cz++) {
+                    int wx = cx * 16;
+                    int wz = cz * 16;
+                    cachedGroundY[i++] = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, wx, wz);
+                }
+            }
+        }
 
         Matrix4f viewMatrix = context.matrixStack().peek().getPositionMatrix();
 
@@ -47,31 +62,18 @@ public class ChunkBordersRenderer {
 
         Tessellator tessellator = Tessellator.getInstance();
 
-        for (int cx = playerChunkX - radius; cx <= playerChunkX + radius + 1; cx++) {
-            for (int cz = playerChunkZ - radius; cz <= playerChunkZ + radius + 1; cz++) {
+        int i = 0;
+        for (int cx = playerChunkX; cx <= playerChunkX + 1; cx++) {
+            for (int cz = playerChunkZ; cz <= playerChunkZ + 1; cz++) {
                 double worldX = cx * 16.0;
                 double worldZ = cz * 16.0;
-                int groundY = getGroundY(world, (int)worldX, (int)worldZ, (int)camPos.y);
-                drawCornerCross(tessellator, viewMatrix, camPos, worldX, worldZ, groundY);
+                drawCornerCross(tessellator, viewMatrix, camPos, worldX, worldZ, cachedGroundY[i++]);
             }
         }
 
         RenderSystem.enableCull();
         RenderSystem.depthMask(true);
         RenderSystem.disableBlend();
-    }
-
-    // Cherche la hauteur du sol au plus proche du joueur en Y
-    private static int getGroundY(World world, int x, int z, int referenceY) {
-        // Chercher vers le bas depuis la position du joueur
-        for (int y = referenceY + 5; y >= LINE_BOTTOM; y--) {
-            BlockPos pos = new BlockPos(x, y, z);
-            BlockState state = world.getBlockState(pos);
-            if (!state.isAir() && state.isSolidBlock(world, pos)) {
-                return y + 1; // +1 pour être au-dessus du bloc
-            }
-        }
-        return referenceY; // fallback
     }
 
     private static void drawCornerCross(Tessellator tessellator, Matrix4f viewMatrix,
@@ -84,11 +86,11 @@ public class ChunkBordersRenderer {
 
         BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
 
-        // Ligne verticale complète
+        // Ligne verticale
         buffer.vertex(viewMatrix, x, bottom, z).color(R, G, B, A);
         buffer.vertex(viewMatrix, x, top,    z).color(R, G, B, A);
 
-        // Croix au sol (dynamique selon le terrain)
+        // Croix au sol
         buffer.vertex(viewMatrix, x, ground, z - CROSS_SIZE).color(R, G, B, A);
         buffer.vertex(viewMatrix, x, ground, z + CROSS_SIZE).color(R, G, B, A);
         buffer.vertex(viewMatrix, x - CROSS_SIZE, ground, z).color(R, G, B, A);
