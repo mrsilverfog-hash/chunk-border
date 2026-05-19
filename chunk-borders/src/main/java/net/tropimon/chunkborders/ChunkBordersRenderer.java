@@ -20,8 +20,6 @@ public class ChunkBordersRenderer {
     private static final int LINE_BOTTOM = -64;
     private static final int LINE_TOP = 320;
     private static final float CROSS_SIZE = 1.0f;
-
-    // Légèrement au dessus du sol (en blocs)
     private static final float GROUND_OFFSET = 0.05f;
 
     private static int[] cachedGroundY = new int[4];
@@ -40,15 +38,16 @@ public class ChunkBordersRenderer {
         int playerChunkX = (int) Math.floor(camPos.x) >> 4;
         int playerChunkZ = (int) Math.floor(camPos.z) >> 4;
 
+        // Référence Y = position des pieds du joueur
+        int playerFeetY = (int) Math.floor(client.player.getY());
+
         long tick = world.getTime();
         if (tick - lastGroundScan >= 20) {
             lastGroundScan = tick;
             int i = 0;
             for (int cx = playerChunkX; cx <= playerChunkX + 1; cx++) {
                 for (int cz = playerChunkZ; cz <= playerChunkZ + 1; cz++) {
-                    cachedGroundY[i++] = world.getTopY(
-                        net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, cx * 16, cz * 16
-                    );
+                    cachedGroundY[i++] = getGroundBelow(world, cx * 16, playerFeetY, cz * 16);
                 }
             }
         }
@@ -76,14 +75,24 @@ public class ChunkBordersRenderer {
         RenderSystem.disableBlend();
     }
 
+    // Cherche le premier bloc solide en dessous du joueur
+    private static int getGroundBelow(World world, int x, int startY, int z) {
+        for (int y = startY + 2; y >= LINE_BOTTOM; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            BlockState state = world.getBlockState(pos);
+            if (!state.isAir()) {
+                return y + 1; // dessus du bloc
+            }
+        }
+        return startY;
+    }
+
     private static void drawCornerCross(Tessellator tessellator, Matrix4f viewMatrix,
                                          Vec3d camPos, double worldX, double worldZ, int groundY) {
         float x = (float)(worldX - camPos.x);
         float z = (float)(worldZ - camPos.z);
         float bottom = (float)(LINE_BOTTOM - camPos.y);
         float top    = (float)(LINE_TOP    - camPos.y);
-
-        // Légèrement au dessus du sol
         float ground = (float)(groundY - camPos.y) + GROUND_OFFSET;
 
         BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
@@ -92,7 +101,7 @@ public class ChunkBordersRenderer {
         buffer.vertex(viewMatrix, x, bottom, z).color(R, G, B, A);
         buffer.vertex(viewMatrix, x, top,    z).color(R, G, B, A);
 
-        // Croix horizontale légèrement au dessus du sol
+        // Croix horizontale au niveau du sol
         buffer.vertex(viewMatrix, x, ground, z - CROSS_SIZE).color(R, G, B, A);
         buffer.vertex(viewMatrix, x, ground, z + CROSS_SIZE).color(R, G, B, A);
         buffer.vertex(viewMatrix, x - CROSS_SIZE, ground, z).color(R, G, B, A);
